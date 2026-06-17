@@ -1,0 +1,15 @@
+{
+  "name": "trends-agent",
+  "version": "1.0.0",
+  "description": "Multi-agent AI system for real-time SE Asian consumer trend & sentiment analysis",
+  "type": "module",
+  "main": "trends_agent.mjs",
+  "scripts": {
+    "start": "node trends_agent.mjs",
+    "start:sector": "node trends_agent.mjs --sector"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "dotenv": "^16.4.7"
+  }
+}
