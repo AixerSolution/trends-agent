@@ -6,7 +6,8 @@
   "main": "trends_agent.mjs",
   "scripts": {
     "start": "node trends_agent.mjs",
-    "start:sector": "node trends_agent.mjs --sector"
+    "start:sector": "node trends_agent.mjs --sector",
+    "dashboard": "node dashboard.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

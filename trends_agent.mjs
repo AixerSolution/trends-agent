@@ -12,7 +12,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { GoogleTrendsConnector } from "./data-integration.mjs";
 
 // Load .env if present
@@ -228,6 +228,40 @@ const TOOLS = [
           description: "e.g. trend_strength, market_size, competition_level, profit_margin",
         },
       },
+    },
+  },
+  {
+    name: "save_run_report",
+    description: "Save the final structured analysis to disk for dashboard display. Call this as your LAST action after generate_opportunity_report.",
+    input_schema: {
+      type: "object",
+      properties: {
+        opportunities: {
+          type: "array",
+          description: "Top 5 ranked opportunities with full detail",
+          items: {
+            type: "object",
+            properties: {
+              rank: { type: "number" },
+              product: { type: "string" },
+              opportunity_score: { type: "number", description: "0-100" },
+              primary_market: { type: "string" },
+              secondary_markets: { type: "array", items: { type: "string" } },
+              growth_velocity: { type: "string", description: "e.g. '245%'" },
+              saturation_pct: { type: "number", description: "Market saturation 0-100" },
+              sentiment_score: { type: "number" },
+              action_window: { type: "string", description: "e.g. '60 days'" },
+              key_insights: { type: "array", items: { type: "string" } },
+              sourcing: { type: "string" },
+              risks: { type: "array", items: { type: "string" } },
+            },
+            required: ["rank", "product", "opportunity_score", "primary_market"],
+          },
+        },
+        themes: { type: "array", items: { type: "string" }, description: "Cross-cutting market themes" },
+        executive_summary: { type: "string", description: "2-3 sentence summary of findings" },
+      },
+      required: ["opportunities"],
     },
   },
 ];
@@ -523,6 +557,18 @@ async function executeTool(name, input) {
       };
     }
 
+    case "save_run_report": {
+      const timestamp = new Date().toISOString();
+      const safeTs = timestamp.replace(/[:.]/g, "-").slice(0, 19);
+      const outputDir = new URL("./output", import.meta.url).pathname;
+      mkdirSync(outputDir, { recursive: true });
+      const filename = `run_${safeTs}.json`;
+      const data = { timestamp, ...input };
+      writeFileSync(`${outputDir}/${filename}`, JSON.stringify(data, null, 2));
+      console.log(`\n💾 Report saved → output/${filename}`);
+      return { status: "saved", filename, opportunities_saved: input.opportunities?.length ?? 0 };
+    }
+
     default:
       return { error: `Unknown tool: ${name}` };
   }
@@ -562,7 +608,8 @@ ANALYSIS FRAMEWORK (follow in order):
 6. Use analyze_market_saturation for each shortlisted product
 7. Use evaluate_import_viability for top candidates
 8. Use calculate_opportunity_score to score each candidate
-9. Use rank_opportunities then generate_opportunity_report for the final output
+9. Use rank_opportunities then generate_opportunity_report for the narrative report
+10. Call save_run_report as your LAST action — provide all 5 ranked opportunities in structured format so the dashboard can display them
 
 TARGET COUNTRIES: Vietnam, Thailand, Indonesia, Philippines, Malaysia, Singapore
 SCORING TARGETS: Sentiment >80 | Growth >100% | Saturation <35%

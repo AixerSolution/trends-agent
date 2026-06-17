@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trends Agent Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    body { background: #0c1117; font-family: 'Inter', system-ui, sans-serif; }
+    .card { background: #131920; border: 1px solid #1e2d3d; }
+    .score-track { background: #1e2d3d; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-up { animation: fadeUp 0.35s ease forwards; }
+    .fade-up:nth-child(2) { animation-delay: 0.05s; }
+    .fade-up:nth-child(3) { animation-delay: 0.10s; }
+    .fade-up:nth-child(4) { animation-delay: 0.15s; }
+    .fade-up:nth-child(5) { animation-delay: 0.20s; }
+    select option { background: #131920; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #0c1117; }
+    ::-webkit-scrollbar-thumb { background: #1e2d3d; border-radius: 9px; }
+  </style>
+</head>
+<body class="text-slate-200 min-h-screen">
+
+  <div class="max-w-7xl mx-auto px-6 py-8">
+
+    <!-- Header -->
+    <div class="flex items-start justify-between mb-8">
+      <div>
+        <div class="flex items-center gap-3 mb-1">
+          <span class="text-2xl">🌏</span>
+          <h1 class="text-xl font-bold text-white tracking-tight">Trends Agent Dashboard</h1>
+        </div>
+        <p class="text-slate-500 text-sm ml-11">SE Asian consumer opportunity intelligence</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="run-select"
+          class="bg-[#131920] border border-[#1e2d3d] text-slate-300 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:border-emerald-600 cursor-pointer">
+          <option>Loading…</option>
+        </select>
+        <button onclick="refresh()"
+          class="bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5">
+          <span id="refresh-icon">↻</span> Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Empty / loading state -->
+    <div id="empty-state" class="hidden text-center py-24">
+      <div class="text-5xl mb-5">📊</div>
+      <p class="text-slate-300 font-medium mb-2">No reports yet</p>
+      <p class="text-slate-500 text-sm mb-5">Run the agent to generate your first report</p>
+      <code class="bg-[#131920] border border-[#1e2d3d] text-emerald-400 text-sm px-4 py-2 rounded-lg">node trends_agent.mjs</code>
+    </div>
+
+    <!-- Main content -->
+    <div id="content" class="hidden">
+
+      <!-- Stats row -->
+      <div id="stats-row" class="grid grid-cols-4 gap-3 mb-7"></div>
+
+      <!-- Opportunity cards -->
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-slate-500 text-xs font-semibold uppercase tracking-widest">Top Opportunities</h2>
+        <span id="run-timestamp" class="text-slate-600 text-xs"></span>
+      </div>
+      <div id="cards-top" class="grid grid-cols-3 gap-3 mb-3"></div>
+      <div id="cards-bottom" class="grid grid-cols-2 gap-3 mb-7"></div>
+
+      <!-- Bottom row: chart + themes -->
+      <div class="grid grid-cols-2 gap-4">
+
+        <!-- Score chart -->
+        <div class="card rounded-xl p-5">
+          <h3 class="text-slate-500 text-xs font-semibold uppercase tracking-widest mb-5">Opportunity Scores</h3>
+          <canvas id="score-chart"></canvas>
+        </div>
+
+        <!-- Themes + summary -->
+        <div class="card rounded-xl p-5 flex flex-col">
+          <h3 class="text-slate-500 text-xs font-semibold uppercase tracking-widest mb-4">Key Market Themes</h3>
+          <div id="themes-list" class="flex-1 space-y-2 mb-5"></div>
+          <div class="border-t border-[#1e2d3d] pt-4">
+            <p class="text-slate-500 text-xs font-semibold uppercase tracking-widest mb-2">Executive Summary</p>
+            <p id="exec-summary" class="text-slate-400 text-sm leading-relaxed"></p>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+  <script>
+    const FLAGS = { Vietnam:'🇻🇳', Thailand:'🇹🇭', Indonesia:'🇮🇩', Philippines:'🇵🇭', Malaysia:'🇲🇾', Singapore:'🇸🇬' };
+    const RANK = ['🥇','🥈','🥉'];
+    let scoreChart = null;
+
+    // ─── Boot ────────────────────────────────────────────────────────────────
+
+    async function init() {
+      const runs = await fetch('/api/runs').then(r => r.json()).catch(() => []);
+      const sel = document.getElementById('run-select');
+
+      if (!runs.length) {
+        sel.innerHTML = '<option>No runs</option>';
+        document.getElementById('empty-state').classList.remove('hidden');
+        return;
+      }
+
+      sel.innerHTML = runs.map((r, i) =>
+        `<option value="${r.id}">${fmtDate(r.timestamp)}${i === 0 ? '  ★' : ''}</option>`
+      ).join('');
+
+      sel.addEventListener('change', () => loadRun(sel.value));
+      loadRun(runs[0].id);
+    }
+
+    async function loadRun(id) {
+      const run = await fetch(`/api/runs/${id}`).then(r => r.json()).catch(() => null);
+      if (!run || !run.opportunities?.length) return;
+      render(run);
+    }
+
+    function refresh() {
+      const icon = document.getElementById('refresh-icon');
+      icon.style.display = 'inline-block';
+      icon.animate([{ transform:'rotate(0)' },{ transform:'rotate(360deg)' }], { duration:500 });
+      setTimeout(() => location.reload(), 500);
+    }
+
+    // ─── Render ──────────────────────────────────────────────────────────────
+
+    function render(run) {
+      const opps = run.opportunities || [];
+
+      renderStats(opps);
+      renderCards(opps);
+      renderChart(opps);
+      renderThemes(run.themes || [], run.executive_summary || '');
+
+      document.getElementById('run-timestamp').textContent = `Run: ${fmtDate(run.timestamp)}`;
+      document.getElementById('content').classList.remove('hidden');
+      document.getElementById('empty-state').classList.add('hidden');
+    }
+
+    function renderStats(opps) {
+      const avg = opps.length ? Math.round(opps.reduce((s, o) => s + o.opportunity_score, 0) / opps.length) : 0;
+      const markets = [...new Set(opps.flatMap(o => [o.primary_market, ...(o.secondary_markets||[])]))].length;
+
+      document.getElementById('stats-row').innerHTML = [
+        statCard('Opportunities Found', opps.length, 'text-emerald-400'),
+        statCard('Top Score', opps[0]?.opportunity_score ?? '—', 'text-emerald-400'),
+        statCard('Markets Covered', markets, 'text-sky-400'),
+        statCard('Avg Score', avg, avg >= 85 ? 'text-emerald-400' : 'text-yellow-400'),
+      ].join('');
+    }
+
+    function statCard(label, value, cls) {
+      return `
+        <div class="card rounded-xl px-5 py-4">
+          <div class="text-slate-600 text-xs uppercase tracking-widest mb-1.5">${label}</div>
+          <div class="${cls} text-3xl font-bold">${value}</div>
+        </div>`;
+    }
+
+    function renderCards(opps) {
+      document.getElementById('cards-top').innerHTML    = opps.slice(0, 3).map(card).join('');
+      document.getElementById('cards-bottom').innerHTML = opps.slice(3, 5).map(card).join('');
+    }
+
+    function card(opp) {
+      const score   = opp.opportunity_score;
+      const fill    = score >= 90 ? '#10b981' : score >= 80 ? '#eab308' : '#f97316';
+      const satCls  = (opp.saturation_pct ?? 99) < 25 ? 'text-emerald-400' : (opp.saturation_pct ?? 99) < 40 ? 'text-yellow-400' : 'text-red-400';
+      const icon    = RANK[opp.rank - 1] || `<span class="text-slate-400 font-bold text-base">#${opp.rank}</span>`;
+      const markets = [opp.primary_market, ...(opp.secondary_markets || [])].filter(Boolean);
+
+      return `
+      <div class="card rounded-xl p-5 fade-up">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xl leading-none">${icon}</span>
+          <span class="text-3xl font-bold leading-none" style="color:${fill}">${score}</span>
+        </div>
+
+        <h3 class="text-white font-semibold text-sm leading-snug mb-1">${opp.product}</h3>
+        <p class="text-slate-500 text-xs mb-3">
+          ${markets.map(m => `${FLAGS[m] || '🌏'} ${m}`).join(' · ')}
+        </p>
+
+        <div class="score-track rounded-full h-1 mb-4">
+          <div class="h-1 rounded-full" style="width:${score}%;background:${fill}"></div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-x-2 mb-4 text-xs">
+          <div>
+            <div class="text-slate-600 mb-0.5">Growth</div>
+            <div class="text-emerald-400 font-medium">↑ ${opp.growth_velocity ?? '—'}</div>
+          </div>
+          <div>
+            <div class="text-slate-600 mb-0.5">Saturation</div>
+            <div class="${satCls} font-medium">${opp.saturation_pct != null ? opp.saturation_pct + '%' : '—'}</div>
+          </div>
+          <div>
+            <div class="text-slate-600 mb-0.5">Window</div>
+            <div class="text-slate-300 font-medium">${opp.action_window ?? '—'}</div>
+          </div>
+        </div>
+
+        ${opp.key_insights?.length ? `
+          <div class="border-t border-[#1e2d3d] pt-3 space-y-1.5">
+            ${opp.key_insights.slice(0, 3).map(i => `
+              <div class="flex gap-1.5 text-xs">
+                <span class="text-emerald-600 mt-px shrink-0">▸</span>
+                <span class="text-slate-400 leading-snug">${i}</span>
+              </div>`).join('')}
+          </div>` : ''}
+
+        ${opp.sourcing ? `
+          <div class="mt-3 pt-3 border-t border-[#1e2d3d]">
+            <div class="text-slate-600 text-xs flex gap-1.5">
+              <span class="shrink-0">📦</span>
+              <span>${opp.sourcing}</span>
+            </div>
+          </div>` : ''}
+
+        ${opp.risks?.length ? `
+          <div class="mt-2 flex flex-wrap gap-1">
+            ${opp.risks.slice(0, 2).map(r =>
+              `<span class="bg-red-950/50 border border-red-900/40 text-red-400 text-xs px-2 py-0.5 rounded-full">${r}</span>`
+            ).join('')}
+          </div>` : ''}
+      </div>`;
+    }
+
+    function renderChart(opps) {
+      if (scoreChart) scoreChart.destroy();
+      const ctx = document.getElementById('score-chart');
+      scoreChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: opps.map(o => o.product.length > 22 ? o.product.slice(0, 20) + '…' : o.product),
+          datasets: [{
+            label: 'Score',
+            data: opps.map(o => o.opportunity_score),
+            backgroundColor: opps.map(o =>
+              o.opportunity_score >= 90 ? '#059669' :
+              o.opportunity_score >= 80 ? '#ca8a04' : '#ea580c'
+            ),
+            borderRadius: 5,
+            borderSkipped: false,
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: ctx => ` Score: ${ctx.parsed.x}  |  ${opps[ctx.dataIndex]?.primary_market ?? ''}`,
+              }
+            }
+          },
+          scales: {
+            x: {
+              min: 0, max: 100,
+              grid: { color: '#1e2d3d' },
+              ticks: { color: '#475569', font: { size: 11 } },
+            },
+            y: {
+              grid: { display: false },
+              ticks: { color: '#94a3b8', font: { size: 11 } },
+            }
+          }
+        }
+      });
+    }
+
+    function renderThemes(themes, summary) {
+      document.getElementById('themes-list').innerHTML = themes.length
+        ? themes.map(t => `
+            <div class="flex gap-2 items-start">
+              <span class="text-emerald-500 mt-0.5 shrink-0">•</span>
+              <span class="text-slate-300 text-sm leading-snug">${t}</span>
+            </div>`).join('')
+        : '<p class="text-slate-600 text-sm">No themes recorded.</p>';
+
+      document.getElementById('exec-summary').textContent = summary || 'No summary available.';
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    function fmtDate(iso) {
+      if (!iso) return '—';
+      return new Date(iso).toLocaleString('en-SG', {
+        day: 'numeric', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      });
+    }
+
+    init();
+  </script>
+
+</body>
+</html>
